@@ -582,9 +582,10 @@ export class ARSession {
   }
 
   private applyTransform(p: PlacedPatch) {
+    // Geometry is rotateX(-π/2) so width = local X, height = local Z (not Y).
     const local = new THREE.Matrix4()
       .makeRotationY((p.rotDeg * Math.PI) / 180)
-      .multiply(new THREE.Matrix4().makeScale(p.scaleX, p.scaleY, 1));
+      .multiply(new THREE.Matrix4().makeScale(p.scaleX, 1, p.scaleY));
     p.mesh.matrix.multiplyMatrices(p.pose, local);
     p.mesh.matrixWorldNeedsUpdate = true;
     p.material.transparent = p.opacity < 1;
@@ -592,48 +593,41 @@ export class ARSession {
     p.material.needsUpdate = true;
   }
 
-  /** In-plane axes of a patch in world space (after rotation). */
-  private patchAxes(p: PlacedPatch) {
-    const rot = new THREE.Matrix4().makeRotationY((p.rotDeg * Math.PI) / 180);
-    const orient = p.pose.clone().multiply(rot);
-    return {
-      center: new THREE.Vector3().setFromMatrixPosition(p.pose),
-      right: new THREE.Vector3().setFromMatrixColumn(orient, 0).normalize(),
-      up: new THREE.Vector3().setFromMatrixColumn(orient, 2).normalize(),
-      normal: new THREE.Vector3().setFromMatrixColumn(orient, 1).normalize(),
-    };
+  /** Corner/edge positions derived from the live mesh matrix (always matches what is rendered). */
+  private geometryCorner(p: PlacedPatch, sx: -1 | 1, sz: -1 | 1): THREE.Vector3 {
+    p.mesh.updateMatrixWorld(true);
+    return new THREE.Vector3(sx * p.baseSize[0] * 0.5, 0, sz * p.baseSize[1] * 0.5).applyMatrix4(
+      p.mesh.matrixWorld,
+    );
   }
 
-  private halfExtents(p: PlacedPatch): [number, number] {
-    return [p.baseSize[0] * p.scaleX * 0.5, p.baseSize[1] * p.scaleY * 0.5];
-  }
-
-  /** Corner index 0..3 (bl, br, tr, tl). */
   private cornerWorld(p: PlacedPatch, ci: number): THREE.Vector3 {
-    const { center, right, up } = this.patchAxes(p);
-    const [hw, hh] = this.halfExtents(p);
-    const sx = ci === 1 || ci === 2 ? 1 : -1;
-    const sy = ci >= 2 ? 1 : -1;
-    return center
-      .clone()
-      .add(right.clone().multiplyScalar(sx * hw))
-      .add(up.clone().multiplyScalar(sy * hh));
+    const signs: [-1 | 1, -1 | 1][] = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    const [sx, sz] = signs[ci];
+    return this.geometryCorner(p, sx, sz);
   }
 
-  /** Edge midpoint index 0..3 (bottom, right, top, left). */
   private edgeWorld(p: PlacedPatch, ei: number): THREE.Vector3 {
-    const { center, right, up } = this.patchAxes(p);
-    const [hw, hh] = this.halfExtents(p);
-    switch (ei) {
-      case 0:
-        return center.clone().add(up.clone().multiplyScalar(-hh));
-      case 1:
-        return center.clone().add(right.clone().multiplyScalar(hw));
-      case 2:
-        return center.clone().add(up.clone().multiplyScalar(hh));
-      default:
-        return center.clone().add(right.clone().multiplyScalar(-hw));
-    }
+    const a = this.cornerWorld(p, ei);
+    const b = this.cornerWorld(p, (ei + 1) % 4);
+    return a.clone().add(b).multiplyScalar(0.5);
+  }
+
+  /** In-plane axes from the live mesh matrix (matches rendered geometry). */
+  private patchAxes(p: PlacedPatch) {
+    p.mesh.updateMatrixWorld(true);
+    const m = p.mesh.matrixWorld;
+    return {
+      center: new THREE.Vector3().setFromMatrixPosition(m),
+      right: new THREE.Vector3().setFromMatrixColumn(m, 0).normalize(),
+      normal: new THREE.Vector3().setFromMatrixColumn(m, 1).normalize(),
+      up: new THREE.Vector3().setFromMatrixColumn(m, 2).normalize(),
+    };
   }
 
   private worldToScreen(v: THREE.Vector3, cam: THREE.Camera): { x: number; y: number } | null {
@@ -708,9 +702,8 @@ export class ARSession {
     const cam = this.xrCamera();
     if (!cam) return null;
     this.raycaster.setFromCamera(this.ndc(x, y), cam);
-    const { normal } = this.patchAxes(p);
-    const point = new THREE.Vector3().setFromMatrixPosition(p.pose);
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point);
+    const { normal, center } = this.patchAxes(p);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, center);
     const hit = new THREE.Vector3();
     return this.raycaster.ray.intersectPlane(plane, hit) ? hit : null;
   }
@@ -844,12 +837,13 @@ export class ARSession {
     const cam = this.xrCamera();
     if (!p || !cam) return;
     this.raycaster.setFromCamera(this.ndc(x, y), cam);
-    const normal = new THREE.Vector3().setFromMatrixColumn(p.pose, 1).normalize();
-    const point = new THREE.Vector3().setFromMatrixPosition(p.pose);
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point);
+    const { normal, center } = this.patchAxes(p);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, center);
     const hit = new THREE.Vector3();
     if (this.raycaster.ray.intersectPlane(plane, hit)) {
-      this.setPosePosition(p, hit);
+      const delta = hit.sub(center);
+      const pos = new THREE.Vector3().setFromMatrixPosition(p.pose).add(delta);
+      this.setPosePosition(p, pos);
       this.applyTransform(p);
     }
   }
