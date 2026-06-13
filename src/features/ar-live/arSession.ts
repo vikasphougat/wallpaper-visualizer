@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { XREstimatedLight } from "three/examples/jsm/webxr/XREstimatedLight.js";
+import { compositeBeforeAfter } from "./arExport";
+import { defaultPatchWidthM, textureRepeatForSize } from "@/lib/physicalScale";
 
 /* WebXR types are accessed loosely via `any` to avoid requiring @types/webxr. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -25,6 +27,7 @@ export interface SerializedPatch {
   scaleY?: number;
   rotDeg: number;
   opacity: number;
+  physicalRepeatCm?: [number, number];
 }
 
 /** Screen-space handle positions for the selected patch overlay. */
@@ -54,6 +57,9 @@ export interface ARStartOptions {
   onDepth?: (enabled: boolean) => void;
   /** True when WebXR plane-detection is active (enables edge-to-edge fitting). */
   onWallFit?: (available: boolean) => void;
+  /** True when the device supports WebXR anchors (user can opt in via the Lock button). */
+  onAnchorsAvailable?: (available: boolean) => void;
+  physicalRepeatCm?: [number, number];
   /** Fires when the selected patch changes (or is cleared) so the UI can sync. */
   onSelectPatch?: (info: PatchInfo | null) => void;
   /** Fires when the number of placed patches changes. */
@@ -86,6 +92,10 @@ interface PlacedPatch {
   wallpaperId?: string;
   textureUrl: string;
   tileable: boolean;
+  physicalRepeatCm: [number, number];
+  /** WebXR anchor — keeps the patch locked to the real wall during the session. */
+  anchor?: any;
+  compareGroupId?: string;
 }
 
 /** A detected vertical wall plane, used for edge-to-edge fitting. */
@@ -95,9 +105,8 @@ interface DetectedWall {
   center: THREE.Vector3;
 }
 
-const NORMAL_SIZE: [number, number] = [1.2, 1.6];
+const NORMAL_HEIGHT_M = 1.6;
 const COVER_SIZE: [number, number] = [3.2, 2.6];
-const TILE_METERS = 0.6;
 const TAP_MOVE_PX = 10;
 const TAP_MS = 500;
 const HANDLE_HIT_PX = 52;
@@ -128,9 +137,19 @@ export class ARSession {
   private currentUrl = "";
   private currentId: string | undefined;
   private currentTileable = true;
+  private physicalRepeatCm: [number, number] = [53, 53];
   private coverMode = false;
+  private compareMode = false;
+  private compareB = { url: "", id: "", tileable: true, physicalRepeatCm: [104, 104] as [number, number] };
 
   private hitTestSource: any = null;
+  private lastHitResult: any = null;
+  /** Device supports WebXR anchors. */
+  private anchorsAvailable = false;
+  /** User opted in — only then create/update anchors. Default off. */
+  private useAnchors = false;
+  private beforeSnapshot: string | null = null;
+  private beforeCaptured = false;
   private localSpace: any = null;
   private session: any = null;
   private xrLight: XREstimatedLight | null = null;
@@ -172,6 +191,7 @@ export class ARSession {
     this.currentUrl = opts.textureUrl;
     this.currentId = opts.wallpaperId;
     this.currentTileable = opts.tileable !== false;
+    this.physicalRepeatCm = opts.physicalRepeatCm ?? [53, 53];
     THREE.Cache.enabled = true;
 
     const xr = (navigator as any).xr;
@@ -243,7 +263,9 @@ export class ARSession {
 
     opts.onDepth?.(Boolean(opts.enableOcclusion && session.depthUsage && session.depthDataFormat));
     this.planeDetection = (session.enabledFeatures ?? []).includes("plane-detection");
+    this.anchorsAvailable = (session.enabledFeatures ?? []).includes("anchors");
     opts.onWallFit?.(this.planeDetection);
+    opts.onAnchorsAvailable?.(this.anchorsAvailable);
 
     const viewerSpace = await session.requestReferenceSpace("viewer");
     this.localSpace = await session.requestReferenceSpace("local");
@@ -267,16 +289,63 @@ export class ARSession {
 
   // ---- Wallpaper / mode -----------------------------------------------------
 
-  setCurrentWallpaper(url: string, id?: string, tileable = true) {
+  setCurrentWallpaper(
+    url: string,
+    id?: string,
+    tileable = true,
+    physicalRepeatCm?: [number, number],
+  ) {
     this.currentUrl = url;
     this.currentId = id;
     this.currentTileable = tileable;
+    if (physicalRepeatCm) this.physicalRepeatCm = physicalRepeatCm;
     const p = this.selected();
-    if (p) void this.reskin(p, url, id, tileable);
+    if (p) void this.reskin(p, url, id, tileable, physicalRepeatCm);
   }
 
   setCoverMode(on: boolean) {
     this.coverMode = on;
+  }
+
+  /**
+   * Opt in to XR anchors so placed wallpaper locks to the real wall.
+   * Off by default — normal tap-to-place works without anchors.
+   */
+  setUseAnchors(on: boolean) {
+    this.useAnchors = on;
+  }
+
+  get isUsingAnchors(): boolean {
+    return this.useAnchors && this.anchorsAvailable;
+  }
+
+  setCompareMode(
+    on: boolean,
+    b?: { url: string; id?: string; tileable?: boolean; physicalRepeatCm?: [number, number] },
+  ) {
+    this.compareMode = on;
+    if (b) {
+      this.compareB = {
+        url: b.url,
+        id: b.id ?? "",
+        tileable: b.tileable !== false,
+        physicalRepeatCm: b.physicalRepeatCm ?? [104, 104],
+      };
+    }
+  }
+
+  /** Export side-by-side before/after PNG for customer sharing. */
+  async exportBeforeAfter(): Promise<string | null> {
+    const after = this.snapshot();
+    if (!after) return null;
+    if (this.beforeSnapshot) {
+      return compositeBeforeAfter(this.beforeSnapshot, after);
+    }
+    return after;
+  }
+
+  get hasBeforeSnapshot(): boolean {
+    return Boolean(this.beforeSnapshot);
   }
 
   // ---- Selected-patch adjustments ------------------------------------------
@@ -390,6 +459,7 @@ export class ARSession {
       scaleY: p.scaleY,
       rotDeg: p.rotDeg,
       opacity: p.opacity,
+      physicalRepeatCm: p.physicalRepeatCm,
     }));
   }
 
@@ -402,6 +472,7 @@ export class ARSession {
         url: s.textureUrl,
         id: s.wallpaperId,
         tileable: s.tileable,
+        physicalRepeatCm: s.physicalRepeatCm ?? [104, 104],
         scaleX: s.scaleX ?? s.scale ?? 1,
         scaleY: s.scaleY ?? s.scale ?? 1,
         rotDeg: s.rotDeg,
@@ -447,9 +518,16 @@ export class ARSession {
     this.opts?.onLayoutChange?.(this.serialize());
   }
 
-  private repeatFor(size: [number, number], tileable: boolean): [number, number] {
-    if (!tileable) return [1, 1]; // single image stretched edge-to-edge
-    return [Math.max(0.5, size[0] / TILE_METERS), Math.max(0.5, size[1] / TILE_METERS)];
+  private repeatFor(
+    size: [number, number],
+    tileable: boolean,
+    physicalRepeatCm: [number, number],
+  ): [number, number] {
+    return textureRepeatForSize(size, physicalRepeatCm, tileable);
+  }
+
+  private normalSize(): [number, number] {
+    return [defaultPatchWidthM(this.physicalRepeatCm), NORMAL_HEIGHT_M];
   }
 
   private loadTextureFor(url: string, repeat: [number, number]): Promise<THREE.Texture> {
@@ -471,12 +549,18 @@ export class ARSession {
     });
   }
 
-  /** Place using the current brush + mode (snap-to-wall, optional edge-to-edge). */
+  /** Place using the current brush + mode (fill wall / compare / anchor). */
   private async addPatch(pose: THREE.Matrix4) {
-    let usePose = pose;
-    let size: [number, number] = this.coverMode ? COVER_SIZE : NORMAL_SIZE;
+    if (this.compareMode) {
+      await this.addComparePair(pose);
+      this.opts?.onPlaced?.();
+      return;
+    }
 
-    // Edge-to-edge: in cover mode, snap to a detected wall plane near the hit.
+    let usePose = pose;
+    let size: [number, number] = this.coverMode ? COVER_SIZE : this.normalSize();
+
+    // Fill wall: snap to detected vertical plane and size edge-to-edge.
     if (this.coverMode) {
       const wall = this.nearestWall(new THREE.Vector3().setFromMatrixPosition(pose));
       if (wall) {
@@ -485,19 +569,103 @@ export class ARSession {
       }
     }
 
+    const anchor = await this.createAnchorFromLastHit();
     await this.createPatch({
       pose: usePose,
       size,
       url: this.currentUrl,
       id: this.currentId,
       tileable: this.currentTileable,
+      physicalRepeatCm: this.physicalRepeatCm,
       scaleX: 1,
       scaleY: 1,
       rotDeg: 0,
       opacity: 1,
+      anchor,
       emit: true,
     });
     this.opts?.onPlaced?.();
+  }
+
+  /** Two half-width patches side-by-side for A/B wallpaper comparison. */
+  private async addComparePair(pose: THREE.Matrix4) {
+    let usePose = pose;
+    let size: [number, number] = this.coverMode ? COVER_SIZE : this.normalSize();
+    if (this.coverMode) {
+      const wall = this.nearestWall(new THREE.Vector3().setFromMatrixPosition(pose));
+      if (wall) {
+        usePose = wall.pose.clone();
+        size = wall.size;
+      }
+    }
+    const { right } = this.patchAxesFromPose(usePose);
+    const center = new THREE.Vector3().setFromMatrixPosition(usePose);
+    const halfW = size[0] * 0.5;
+    const h = size[1];
+    const groupId = `cmp-${Date.now()}`;
+    const anchor = await this.createAnchorFromLastHit();
+
+    const leftPose = usePose.clone();
+    this.setPosePositionMatrix(leftPose, center.clone().add(right.clone().multiplyScalar(-size[0] * 0.25)));
+    const rightPose = usePose.clone();
+    this.setPosePositionMatrix(rightPose, center.clone().add(right.clone().multiplyScalar(size[0] * 0.25)));
+
+    await this.createPatch({
+      pose: leftPose,
+      size: [halfW, h],
+      url: this.currentUrl,
+      id: this.currentId,
+      tileable: this.currentTileable,
+      physicalRepeatCm: this.physicalRepeatCm,
+      scaleX: 1,
+      scaleY: 1,
+      rotDeg: 0,
+      opacity: 1,
+      anchor,
+      compareGroupId: groupId,
+      emit: false,
+    });
+    await this.createPatch({
+      pose: rightPose,
+      size: [halfW, h],
+      url: this.compareB.url,
+      id: this.compareB.id,
+      tileable: this.compareB.tileable,
+      physicalRepeatCm: this.compareB.physicalRepeatCm,
+      scaleX: 1,
+      scaleY: 1,
+      rotDeg: 0,
+      opacity: 1,
+      compareGroupId: groupId,
+      emit: true,
+    });
+  }
+
+  private patchAxesFromPose(pose: THREE.Matrix4) {
+    return {
+      center: new THREE.Vector3().setFromMatrixPosition(pose),
+      right: new THREE.Vector3().setFromMatrixColumn(pose, 0).normalize(),
+      up: new THREE.Vector3().setFromMatrixColumn(pose, 2).normalize(),
+      normal: new THREE.Vector3().setFromMatrixColumn(pose, 1).normalize(),
+    };
+  }
+
+  private setPosePositionMatrix(pose: THREE.Matrix4, pos: THREE.Vector3) {
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    pose.decompose(new THREE.Vector3(), q, s);
+    pose.compose(pos, q, new THREE.Vector3(1, 1, 1));
+  }
+
+  private async createAnchorFromLastHit(): Promise<any | undefined> {
+    if (!this.useAnchors || !this.anchorsAvailable || !this.lastHitResult?.createAnchor) {
+      return undefined;
+    }
+    try {
+      return await this.lastHitResult.createAnchor();
+    } catch {
+      return undefined;
+    }
   }
 
   private async createPatch(o: {
@@ -506,15 +674,21 @@ export class ARSession {
     url: string;
     id?: string;
     tileable: boolean;
+    physicalRepeatCm: [number, number];
     scaleX: number;
     scaleY: number;
     rotDeg: number;
     opacity: number;
+    anchor?: any;
+    compareGroupId?: string;
     emit: boolean;
   }) {
     let texture: THREE.Texture;
     try {
-      texture = await this.loadTextureFor(o.url, this.repeatFor(o.size, o.tileable));
+      texture = await this.loadTextureFor(
+        o.url,
+        this.repeatFor(o.size, o.tileable, o.physicalRepeatCm),
+      );
     } catch {
       this.opts?.onError?.("Could not load that wallpaper image.");
       return;
@@ -556,6 +730,9 @@ export class ARSession {
       wallpaperId: o.id,
       textureUrl: o.url,
       tileable: o.tileable,
+      physicalRepeatCm: o.physicalRepeatCm,
+      anchor: o.anchor,
+      compareGroupId: o.compareGroupId,
     };
     this.placed.push(patch);
     this.applyTransform(patch);
@@ -564,10 +741,17 @@ export class ARSession {
     if (o.emit) this.emitLayout();
   }
 
-  private async reskin(p: PlacedPatch, url: string, id: string | undefined, tileable: boolean) {
+  private async reskin(
+    p: PlacedPatch,
+    url: string,
+    id: string | undefined,
+    tileable: boolean,
+    physicalRepeatCm?: [number, number],
+  ) {
     let texture: THREE.Texture;
+    const phys = physicalRepeatCm ?? p.physicalRepeatCm;
     try {
-      texture = await this.loadTextureFor(url, this.repeatFor(p.baseSize, tileable));
+      texture = await this.loadTextureFor(url, this.repeatFor(p.baseSize, tileable, phys));
     } catch {
       return;
     }
@@ -578,6 +762,7 @@ export class ARSession {
     p.wallpaperId = id;
     p.textureUrl = url;
     p.tileable = tileable;
+    p.physicalRepeatCm = phys;
     this.emitLayout();
   }
 
@@ -749,12 +934,41 @@ export class ARSession {
   }
 
   private disposePatch(p: PlacedPatch) {
+    try {
+      p.anchor?.delete?.();
+    } catch {
+      /* best-effort */
+    }
     this.scene.remove(p.mesh);
     p.mesh.geometry.dispose();
     p.material.dispose();
     p.texture.dispose();
     p.outline.geometry.dispose();
     (p.outline.material as THREE.Material).dispose();
+  }
+
+  /** Update patch poses from XR anchors (prevents drift while walking around). */
+  private updateAnchoredPatches(frame: any) {
+    if (!this.useAnchors || !this.anchorsAvailable) return;
+    for (const p of this.placed) {
+      if (!p.anchor?.anchorSpace) continue;
+      const anchorPose = frame.getPose(p.anchor.anchorSpace, this.localSpace);
+      if (!anchorPose) continue;
+      const m = new THREE.Matrix4().fromArray(anchorPose.transform.matrix);
+      const pos = new THREE.Vector3().setFromMatrixPosition(m);
+      const nrm = new THREE.Vector3().setFromMatrixColumn(m, 1).normalize();
+      p.pose.copy(this.wallPose(pos, nrm));
+      this.applyTransform(p);
+    }
+  }
+
+  private captureBeforeIfNeeded() {
+    if (this.beforeCaptured || this.placed.length > 0) return;
+    const url = this.snapshot();
+    if (url) {
+      this.beforeSnapshot = url;
+      this.beforeCaptured = true;
+    }
   }
 
   private placementPose(): THREE.Matrix4 | null {
@@ -977,6 +1191,7 @@ export class ARSession {
 
       if (this.hitTestSource) {
         const results = frame.getHitTestResults(this.hitTestSource);
+        this.lastHitResult = results.length ? results[0] : null;
         if (results.length) {
           const pose = results[0].getPose(this.localSpace);
           if (pose) {
@@ -1001,6 +1216,8 @@ export class ARSession {
       }
 
       if (this.planeDetection) this.updateDetectedWalls(frame);
+      this.updateAnchoredPatches(frame);
+      this.captureBeforeIfNeeded();
     } catch {
       // Swallow transient per-frame tracking errors; keep rendering.
     }
@@ -1051,6 +1268,11 @@ export class ARSession {
     this.reticleVisible = false;
     this.recentHits.length = 0;
     this.detectedWalls.length = 0;
+    this.lastHitResult = null;
+    this.beforeCaptured = false;
+    this.beforeSnapshot = null;
+    this.useAnchors = false;
+    this.anchorsAvailable = false;
     this.pointers.clear();
   }
 }

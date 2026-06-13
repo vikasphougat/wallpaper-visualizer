@@ -1,18 +1,24 @@
 import { Link } from "react-router-dom";
-import { CATALOG } from "@/data/catalog";
+import { useWallpaperLibrary } from "@/hooks/useWallpaperLibrary";
 import { useSelection } from "@/stores/selection";
 
 export default function CatalogPage() {
+  const { library, syncing, marshallsCount } = useWallpaperLibrary();
   const wallpaper = useSelection((s) => s.wallpaper);
   const select = useSelection((s) => s.select);
 
   return (
     <section className="page">
       <h2 className="page__heading">Wallpaper catalog</h2>
-      <p className="page__sub">Pick a design. It stays selected across the Photo, 3D, and AR tabs.</p>
+      <p className="page__sub">
+        Pick a design. It stays selected across the Photo, 3D, and AR tabs.
+        {marshallsCount > 0 && (
+          <> Marshalls: <strong>{marshallsCount}</strong> designs{syncing ? " (syncing…)" : ""}.</>
+        )}
+      </p>
 
       <div className="catalog">
-        {CATALOG.map((w) => {
+        {library.map((w) => {
           const active = w.id === wallpaper.id;
           return (
             <button

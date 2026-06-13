@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Wallpaper AR",
+    "slug": "wallpaper-ar",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "ios": {
+      "bundleIdentifier": "com.wallpapervisualizer.ar",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera is used to preview wallpaper on your walls in AR."
+      }
+    },
+    "plugins": []
+  }
+}

@@ -58,7 +58,7 @@ const botanical = svgPattern(
 );
 
 /** Built-in seamless SVG patterns (tile perfectly at any scale). */
-const PATTERNS: Wallpaper[] = [
+export const PATTERNS: Wallpaper[] = [
   { id: "stripes", name: "Heritage Stripe", texture: stripes, physicalRepeatCm: [53, 53], accent: "#c9a36b", tileable: true },
   { id: "grid", name: "Sage Grid", texture: grid, physicalRepeatCm: [53, 53], accent: "#3f5d57", tileable: true },
   { id: "polka", name: "Rose Dot", texture: polka, physicalRepeatCm: [53, 53], accent: "#d7607a", tileable: true },

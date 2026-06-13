@@ -158,8 +158,10 @@ tracking error can't permanently stop AR.
   wall", delete-selected, save/restore layout, and a remote **Marshalls India** preview catalog
   (Shopify CDN, CORS-safe). _Marshalls images are copyrighted demo content — license your own before
   production._
-- **Phase 6 — Next:** XR anchors, cm-accurate scale, occlusion via segmentation, and a React Native +
-  ViroReact (ARKit) app for iOS.
+- **Phase 6 — Anchors, fill, compare, export, scale & catalog sync:** done — XR anchors, auto Fill
+  wall on tap, Compare mode (A/B split), Before/After export, physical scale (1.04 m roll), dynamic
+  Marshalls Shopify catalog sync.
+- **Phase 7 — iOS native:** scaffold in `mobile/wallpaper-ar/` (Expo); full ARKit placement next.
 
 > **See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the full, serial step-by-step
 > plan** (every step, in order, with status and the files it touches).

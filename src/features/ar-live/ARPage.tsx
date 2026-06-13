@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSelection } from "@/stores/selection";
 import { useXRSupport } from "@/hooks/useXRSupport";
-import { CATALOG } from "@/data/catalog";
+import { useWallpaperLibrary } from "@/hooks/useWallpaperLibrary";
 import type { Wallpaper } from "@/types";
 import { ARSession, type HandleOverlay, type SerializedPatch } from "./arSession";
 
@@ -21,6 +21,7 @@ function readJSON<T>(key: string, fallback: T): T {
 
 export default function ARPage() {
   const { wallpaper } = useSelection();
+  const { library, syncing } = useWallpaperLibrary();
   const xr = useXRSupport();
 
   const sessionRef = useRef<ARSession | null>(null);
@@ -32,6 +33,8 @@ export default function ARPage() {
   const [reticle, setReticle] = useState(false);
   const [occlusion, setOcclusion] = useState(false);
   const [wallFit, setWallFit] = useState(false);
+  const [anchorsAvailable, setAnchorsAvailable] = useState(false);
+  const [useAnchors, setUseAnchors] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [count, setCount] = useState(0);
 
@@ -41,30 +44,35 @@ export default function ARPage() {
 
   const [custom, setCustom] = useState<Wallpaper[]>(() => readJSON<Wallpaper[]>(CUSTOM_KEY, []));
   const [currentId, setCurrentId] = useState(wallpaper.id);
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [pickTarget, setPickTarget] = useState<"a" | "b">("a");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [coverMode, setCoverMode] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
   const [savedCount, setSavedCount] = useState(() => readJSON<SerializedPatch[]>(LAYOUT_KEY, []).length);
   const [handles, setHandles] = useState<HandleOverlay | null>(null);
 
-  const library = useMemo<Wallpaper[]>(() => [...CATALOG, ...custom], [custom]);
+  const fullLibrary = useMemo<Wallpaper[]>(() => [...library, ...custom], [library, custom]);
   const current = useMemo(
-    () => library.find((w) => w.id === currentId) ?? wallpaper,
-    [library, currentId, wallpaper],
+    () => fullLibrary.find((w) => w.id === currentId) ?? wallpaper,
+    [fullLibrary, currentId, wallpaper],
+  );
+  const compareWall = useMemo(
+    () => (compareId ? fullLibrary.find((w) => w.id === compareId) : null),
+    [fullLibrary, compareId],
   );
 
   useEffect(() => () => void sessionRef.current?.end(), []);
 
-  // Persist the custom (uploaded) library so swatches survive a reload.
   useEffect(() => {
     try {
       localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
     } catch {
-      /* quota — ignore */
+      /* quota */
     }
   }, [custom]);
 
-  // Touching overlay controls must not also fire a WebXR `select`.
   useEffect(() => {
     const root = overlayRef.current;
     if (!root) return;
@@ -73,6 +81,16 @@ export default function ARPage() {
     return () => root.removeEventListener("beforexrselect", block);
   }, []);
 
+  function syncCompareToSession() {
+    const b = compareWall ?? fullLibrary.find((w) => w.id !== current.id) ?? current;
+    sessionRef.current?.setCompareMode(compareMode, {
+      url: b.texture,
+      id: b.id,
+      tileable: b.tileable !== false,
+      physicalRepeatCm: b.physicalRepeatCm,
+    });
+  }
+
   async function startAR() {
     if (!overlayRef.current || !gestureRef.current) return;
     setError(null);
@@ -80,15 +98,19 @@ export default function ARPage() {
     const session = new ARSession();
     sessionRef.current = session;
     session.setCoverMode(coverMode);
+    session.setUseAnchors(useAnchors);
+    syncCompareToSession();
     await session.start({
       overlayRoot: overlayRef.current,
       gestureRoot: gestureRef.current,
       textureUrl: current.texture,
       wallpaperId: current.id,
       tileable: current.tileable !== false,
+      physicalRepeatCm: current.physicalRepeatCm,
       onReticle: (v) => setReticle(v),
       onDepth: (v) => setOcclusion(v),
       onWallFit: (v) => setWallFit(v),
+      onAnchorsAvailable: (v) => setAnchorsAvailable(v),
       onCountChange: (n) => setCount(n),
       onPlaced: () => setPhase("placed"),
       onSelectPatch: (info) => {
@@ -102,7 +124,7 @@ export default function ARPage() {
         try {
           localStorage.setItem(LAYOUT_KEY, JSON.stringify(patches));
         } catch {
-          /* quota — ignore */
+          /* quota */
         }
         setSavedCount(patches.length);
       },
@@ -116,6 +138,8 @@ export default function ARPage() {
         setReticle(false);
         setOcclusion(false);
         setWallFit(false);
+        setAnchorsAvailable(false);
+        setUseAnchors(false);
         setCount(0);
         setHandles(null);
         sessionRef.current = null;
@@ -131,9 +155,26 @@ export default function ARPage() {
     void sessionRef.current.restore(saved);
   }
 
-  function pickWallpaper(w: Wallpaper) {
+  function pickWallpaper(w: Wallpaper, forCompare = false) {
+    if (forCompare) {
+      setCompareId(w.id);
+      if (compareMode) {
+        sessionRef.current?.setCompareMode(true, {
+          url: w.texture,
+          id: w.id,
+          tileable: w.tileable !== false,
+          physicalRepeatCm: w.physicalRepeatCm,
+        });
+      }
+      return;
+    }
     setCurrentId(w.id);
-    sessionRef.current?.setCurrentWallpaper(w.texture, w.id, w.tileable !== false);
+    sessionRef.current?.setCurrentWallpaper(
+      w.texture,
+      w.id,
+      w.tileable !== false,
+      w.physicalRepeatCm,
+    );
   }
 
   function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -144,8 +185,8 @@ export default function ARPage() {
       const w: Wallpaper = {
         id: `custom-${Date.now()}`,
         name: file.name.replace(/\.[^.]+$/, "").slice(0, 24) || "My wallpaper",
-        texture: reader.result as string, // data URL → persists across reloads
-        physicalRepeatCm: [53, 53],
+        texture: reader.result as string,
+        physicalRepeatCm: [104, 104],
         accent: "#6ea8fe",
         tileable: false,
         source: "Uploaded",
@@ -163,7 +204,27 @@ export default function ARPage() {
     sessionRef.current?.setCoverMode(next);
   }
 
-  // Only one tray open at a time so the camera view stays clear.
+  function toggleAnchors() {
+    const next = !useAnchors;
+    setUseAnchors(next);
+    sessionRef.current?.setUseAnchors(next);
+  }
+
+  function toggleCompare() {
+    const next = !compareMode;
+    setCompareMode(next);
+    if (next && !compareId) {
+      const alt = fullLibrary.find((w) => w.id !== current.id);
+      if (alt) setCompareId(alt.id);
+    }
+    sessionRef.current?.setCompareMode(next, compareWall ? {
+      url: compareWall.texture,
+      id: compareWall.id,
+      tileable: compareWall.tileable !== false,
+      physicalRepeatCm: compareWall.physicalRepeatCm,
+    } : undefined);
+  }
+
   function toggleWallpaperTray() {
     setPickerOpen((o) => {
       const next = !o;
@@ -201,6 +262,15 @@ export default function ARPage() {
     a.click();
   }
 
+  async function exportBeforeAfter() {
+    const url = await sessionRef.current?.exportBeforeAfter();
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `wallpaper-before-after-${current.id}.png`;
+    a.click();
+  }
+
   const inSession = phase === "scanning" || phase === "placed" || phase === "starting";
 
   return (
@@ -219,6 +289,7 @@ export default function ARPage() {
               <strong className={xr === "supported" ? "ok" : xr === "checking" ? "" : "warn"}>
                 {xr === "checking" ? "checking…" : xr === "supported" ? "available" : "not available"}
               </strong>
+              {syncing && <span className="hint"> · syncing Marshalls catalog…</span>}
             </p>
 
             {xr === "supported" && (
@@ -228,22 +299,19 @@ export default function ARPage() {
             {xr === "unsupported" && (
               <p className="hint">
                 Live AR needs <strong>Android Chrome with ARCore</strong> over <strong>HTTPS</strong>.
-                A plain <code>http://LAN-IP</code> URL is not a secure context, so AR is blocked even
-                on capable phones — use an HTTPS tunnel or <code>npm i -D @vitejs/plugin-basic-ssl</code>
-                (see README). iOS Safari has no WebXR; that needs the native ViroReact build.
-                Meanwhile, try the <strong>Photo</strong> or <strong>3D Room</strong> tabs.
+                iOS needs the native app in <code>mobile/</code> (ARKit). Meanwhile try <strong>Photo</strong> or <strong>3D Room</strong>.
               </p>
             )}
 
             {error && <p className="error">{error}</p>}
             <ul>
-              <li>Tap an empty area to place wallpaper on the detected wall</li>
-              <li>Each wall can use a <strong>different wallpaper</strong> — pick from the in-AR tray</li>
-              <li><strong>Drag corners/edges</strong> to stretch the wallpaper to fit the wall</li>
-              <li><strong>Drag center</strong> to move · <strong>pinch</strong> to resize · <strong>twist</strong> to rotate</li>
-              <li>Tap a placed patch to select it, then <strong>Delete</strong> or fine-tune with sliders</li>
-              <li>“Cover wall” fits the wallpaper <strong>edge-to-edge</strong> on detected walls</li>
-              <li>Your layout is saved — use <strong>Restore</strong> next session</li>
+              <li>Tap a wall to place wallpaper — adjust corners and edges after placing</li>
+              <li><strong>Lock wall</strong> (optional) — keeps wallpaper fixed to the wall when you walk around</li>
+              <li><strong>Fill wall</strong> — one tap sizes wallpaper edge-to-edge on detected walls</li>
+              <li><strong>Compare</strong> — place two designs side-by-side on the same wall</li>
+              <li><strong>Before/After export</strong> — shareable customer image</li>
+              <li>Physical scale uses real roll width (Marshalls 1.04 m)</li>
+              <li>Marshalls catalog syncs automatically from their Shopify store</li>
             </ul>
           </div>
         </div>
@@ -252,7 +320,6 @@ export default function ARPage() {
       <div ref={overlayRef} className={`ar-overlay${inSession ? " is-on" : ""}`}>
         <div ref={gestureRef} className="ar-overlay__gesture" />
 
-        {/* Corner (large) + edge (small) drag handles for the selected patch */}
         {handles && inSession && (
           <div className="ar-handles" aria-hidden>
             {handles.corners.map((pt, i) => (
@@ -267,10 +334,13 @@ export default function ARPage() {
         <div className="ar-overlay__top">
           <button className="ar-overlay__exit" onClick={() => sessionRef.current?.end()}>✕ Exit</button>
           <span className="ar-overlay__chip">
-            {current.name}
+            {compareMode ? `${current.name} vs ${compareWall?.name ?? "…"}` : current.name}
             {count > 0 && <span className="ar-overlay__badge"> · {count} placed</span>}
-            {wallFit && coverMode && <span className="ar-overlay__badge" title="Edge-to-edge wall fit"> · edge-fit</span>}
-            {occlusion && <span className="ar-overlay__badge" title="Depth occlusion active"> · occlusion</span>}
+            {useAnchors && anchorsAvailable && (
+              <span className="ar-overlay__badge" title="XR anchors active"> · locked</span>
+            )}
+            {wallFit && coverMode && <span className="ar-overlay__badge" title="Auto fill wall"> · fill</span>}
+            {compareMode && <span className="ar-overlay__badge"> · compare</span>}
           </span>
         </div>
 
@@ -278,11 +348,15 @@ export default function ARPage() {
           {phase === "starting" && "Starting AR…"}
           {phase === "scanning" &&
             (reticle
-              ? coverMode
-                ? "Tap a wall to cover it edge-to-edge · pinch to fine-tune"
-                : "Tap to place · drag to move · pinch to resize · open Adjust for sliders"
-              : "Aim at a textured spot and move slowly — or use “Place here”")}
-          {phase === "placed" && "Drag corners/edges to fit the wall · pinch to rotate/scale · open trays below"}
+              ? compareMode
+                ? "Tap wall to compare two wallpapers side-by-side"
+                : coverMode
+                  ? "Tap wall to auto-fill edge-to-edge"
+                  : useAnchors
+                    ? "Tap to place · Lock wall keeps it fixed when you move"
+                    : "Tap to place wallpaper · drag corners to fit"
+              : "Aim at the wall and move slowly")}
+          {phase === "placed" && "Drag corners/edges · optional Lock wall / Fill wall / Compare below"}
         </div>
 
         <div className="ar-overlay__bottom">
@@ -290,26 +364,38 @@ export default function ARPage() {
             <button
               className={`ar-overlay__arrow${pickerOpen ? " is-on" : ""}`}
               onClick={toggleWallpaperTray}
-              aria-expanded={pickerOpen}
             >
               {pickerOpen ? "▾" : "▴"} Wallpaper
             </button>
             <button
               className={`ar-overlay__arrow${adjustOpen ? " is-on" : ""}`}
               onClick={toggleAdjustTray}
-              aria-expanded={adjustOpen}
             >
               {adjustOpen ? "▾" : "▴"} Adjust
             </button>
             <button
               className={`ar-overlay__toggle${coverMode ? " is-on" : ""}`}
               onClick={toggleCover}
-              title="Fit / tile a sheet across the whole wall (edge-to-edge where supported)"
             >
-              {coverMode ? "✓ " : ""}Cover wall
+              {coverMode ? "✓ " : ""}Fill wall
             </button>
+            <button
+              className={`ar-overlay__toggle${compareMode ? " is-on" : ""}`}
+              onClick={toggleCompare}
+            >
+              {compareMode ? "✓ " : ""}Compare
+            </button>
+            {anchorsAvailable && (
+              <button
+                className={`ar-overlay__toggle${useAnchors ? " is-on" : ""}`}
+                onClick={toggleAnchors}
+                title="Lock wallpaper to the real wall (XR anchors)"
+              >
+                {useAnchors ? "✓ " : ""}Lock wall
+              </button>
+            )}
             {savedCount > 0 && (
-              <button className="ar-overlay__toggle" onClick={restoreLayout} title="Re-place your saved layout">
+              <button className="ar-overlay__toggle" onClick={restoreLayout}>
                 ↺ Restore ({savedCount})
               </button>
             )}
@@ -317,12 +403,26 @@ export default function ARPage() {
 
           {pickerOpen && (
             <div className="ar-overlay__tray">
-              {library.map((w) => (
+              {compareMode && (
+                <div className="ar-overlay__tray-hint ar-overlay__ab">
+                  <button
+                    className={`ar-overlay__toggle${pickTarget === "a" ? " is-on" : ""}`}
+                    onClick={() => setPickTarget("a")}
+                  >A · left</button>
+                  <button
+                    className={`ar-overlay__toggle${pickTarget === "b" ? " is-on" : ""}`}
+                    onClick={() => setPickTarget("b")}
+                  >B · right</button>
+                </div>
+              )}
+              {fullLibrary.map((w) => (
                 <button
                   key={w.id}
-                  className={`ar-swatch${w.id === currentId ? " is-active" : ""}`}
+                  className={`ar-swatch${
+                    w.id === currentId ? " is-active" : w.id === compareId ? " is-compare" : ""
+                  }`}
                   style={{ backgroundImage: `url("${w.texture}")` }}
-                  onClick={() => pickWallpaper(w)}
+                  onClick={() => pickWallpaper(w, compareMode && pickTarget === "b")}
                   title={w.source ? `${w.name} — ${w.source}` : w.name}
                 >
                   <span className="ar-swatch__name">{w.name}</span>
@@ -340,26 +440,20 @@ export default function ARPage() {
             <div className="ar-overlay__controls">
               <label>
                 Size
-                <input
-                  type="range" min={0.3} max={6} step={0.05} value={arScale}
-                  onChange={(e) => adjustScale(Number(e.target.value))}
-                />
+                <input type="range" min={0.3} max={6} step={0.05} value={arScale}
+                  onChange={(e) => adjustScale(Number(e.target.value))} />
                 <span className="ar-overlay__val">{arScale.toFixed(2)}×</span>
               </label>
               <label>
                 Rotate
-                <input
-                  type="range" min={0} max={360} step={1} value={arRotation}
-                  onChange={(e) => adjustRotation(Number(e.target.value))}
-                />
+                <input type="range" min={0} max={360} step={1} value={arRotation}
+                  onChange={(e) => adjustRotation(Number(e.target.value))} />
                 <span className="ar-overlay__val">{Math.round(arRotation)}°</span>
               </label>
               <label>
                 Transparency
-                <input
-                  type="range" min={0} max={0.8} step={0.05} value={1 - arOpacity}
-                  onChange={(e) => adjustOpacity(1 - Number(e.target.value))}
-                />
+                <input type="range" min={0} max={0.8} step={0.05} value={1 - arOpacity}
+                  onChange={(e) => adjustOpacity(1 - Number(e.target.value))} />
                 <span className="ar-overlay__val">{Math.round((1 - arOpacity) * 100)}%</span>
               </label>
               <div className="ar-overlay__buttons">
@@ -372,6 +466,7 @@ export default function ARPage() {
                 <button className="btn" onClick={() => sessionRef.current?.removeLast()}>Undo</button>
                 <button className="btn" onClick={() => sessionRef.current?.clearPlaced()}>Clear</button>
                 <button className="btn" onClick={snapshot}>Snapshot</button>
+                <button className="btn" onClick={exportBeforeAfter}>Before/After</button>
               </div>
             </div>
           )}

@@ -435,6 +435,9 @@ body {
   padding: 0;
 }
 .ar-swatch.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.ar-swatch.is-compare { border-color: #e8a838; box-shadow: 0 0 0 2px #e8a838; }
+.ar-overlay__tray-hint { flex: 0 0 100%; margin: 0; font-size: 0.75rem; color: rgba(255,255,255,0.85); }
+.ar-overlay__ab { display: flex; gap: 8px; margin-bottom: 4px; }
 .ar-swatch__name {
   position: absolute;
   left: 0; right: 0; bottom: 0;

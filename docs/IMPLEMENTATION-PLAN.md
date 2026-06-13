@@ -108,12 +108,20 @@ tweak. Toggle "Cover wall" before placing for a full-wall sheet.
 37. ✅ **Remote wallpaper catalog (Marshalls India)**: pulled from the public Shopify `/products.json` feed; served from the CORS-enabled Shopify CDN so textures don't taint snapshots. Non-tileable product photos render as a single edge-to-edge image. _Files: `src/data/marshalls.ts`, `src/data/catalog.ts`, `src/types.ts` (`tileable`/`source`)._
     > ⚠️ Licensing: Marshalls images are their copyrighted product photos, bundled only as demo content. Obtain rights or swap in your own licensed/tileable textures before any production use.
 
-## Phase 6 — Next up (planned) ⬜
+## Phase 6 — Anchors, fill, compare, export, scale & catalog sync ✅
 
-38. ⬜ **XR anchors**: attach placed patches to anchors so they (and restores) stay locked when tracking drifts.
-39. ⬜ **Physical-scale accuracy**: use `physicalRepeatCm` to size tiles in metres.
-40. ⬜ **iOS path**: native React Native + ViroReact (ARKit) build, since iOS Safari has no WebXR.
-41. ⬜ **Quality pass**: occlusion via segmentation (instead of depth), brush-to-fix wall mask in Photo tab, visual-regression tests.
+38. ✅ **XR anchors**: WebXR `anchors` optional feature; each placement calls `hit.createAnchor()` when available; per-frame `updateAnchoredPatches` locks patch pose to the wall (badge: `· anchored`). _Files: `arSession.ts`._
+39. ✅ **Auto Fill wall on tap**: **Fill wall** mode (default ON) snaps to detected vertical plane and sizes edge-to-edge on one tap — no manual corner dragging required when plane-detection works. _Files: `arSession.ts`, `ARPage.tsx`._
+40. ✅ **Compare mode**: toggle places **two half-width patches** side-by-side (wallpaper A left, B right). Pick A/B in the wallpaper tray. _Files: `arSession.ts` (`addComparePair`), `ARPage.tsx`._
+41. ✅ **Before/After export**: captures a room frame before first placement; **Before/After** button composites side-by-side PNG for customers. _Files: `arExport.ts`, `arSession.ts`, `ARPage.tsx`._
+42. ✅ **Physical scale**: texture repeat and default patch width use real `physicalRepeatCm` (Marshalls roll **1.04 m**). _Files: `physicalScale.ts`, `arSession.ts`._
+43. ✅ **Catalog sync**: paginated fetch from `marshallsindia.com/products.json`, 12 h cache in `localStorage`; used in Catalog, Strip, and AR tray. _Files: `marshallsSync.ts`, `useMarshallsCatalog.ts`, `useWallpaperLibrary.ts`._
+
+## Phase 7 — iOS native (scaffold) 🟡
+
+44. 🟡 **Expo iOS scaffold** — `mobile/wallpaper-ar/` with README, `app.json`, placeholder `App.tsx`. Full ARKit placement is the next step (ViroReact or expo-three).
+45. ⬜ **ARKit wall placement** — plane detection, fill wall, compare, export parity with web.
+46. ⬜ **Quality pass**: occlusion via segmentation, brush-to-fix wall mask in Photo tab, visual-regression tests.
 
 ---
 

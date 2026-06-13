@@ -1,14 +1,15 @@
-import { CATALOG } from "@/data/catalog";
+import { useWallpaperLibrary } from "@/hooks/useWallpaperLibrary";
 import { useSelection } from "@/stores/selection";
 
 /** Horizontal quick-picker so the chosen wallpaper persists across every tab. */
 export function WallpaperStrip() {
+  const { library } = useWallpaperLibrary();
   const wallpaper = useSelection((s) => s.wallpaper);
   const select = useSelection((s) => s.select);
 
   return (
     <div className="strip" role="listbox" aria-label="Choose wallpaper">
-      {CATALOG.map((w) => {
+      {library.map((w) => {
         const active = w.id === wallpaper.id;
         return (
           <button
