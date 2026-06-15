@@ -1,40 +1,57 @@
 /**
- * OPTIONAL wall auto-detection via TensorFlow.js DeepLab (ADE20K).
- *
- * In ADE20K the "wall" class is index 0. We run the model, find all wall
- * pixels and return their bounding quad (normalised) as a quick auto-placement
- * for the corner handles. The user can then fine-tune.
- *
- * The TF.js packages are OPTIONAL dependencies (heavy ~MBs). If they are not
- * installed, this function rejects with a friendly message and the manual
- * corner workflow keeps working.
+ * Wall auto-detection via TensorFlow.js DeepLab (ADE20K).
+ * Class index 0 = wall. Returns a normalised bounding quad for corner handles.
  */
-export async function detectWallQuad(bitmap: ImageBitmap): Promise<[number, number][]> {
-  // The specifiers are kept in variables and marked @vite-ignore so Vite does
-  // NOT try to resolve these optional packages at transform time. Resolution
-  // happens at runtime, so an uninstalled package is caught here instead of
-  // crashing the dev server.
-  const tfSpecifier = "@tensorflow/tfjs";
-  const deeplabSpecifier = "@tensorflow-models/deeplab";
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let tf: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let deeplab: any;
+let mlReady: Promise<boolean> | null = null;
+
+/** Probe whether TF.js + DeepLab can be loaded (cached after first check). */
+export function isMlAvailable(): Promise<boolean> {
+  if (!mlReady) {
+    mlReady = (async () => {
+      try {
+        await import("@tensorflow/tfjs");
+        await import("@tensorflow-models/deeplab");
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+  }
+  return mlReady;
+}
+
+export async function detectWallQuad(bitmap: ImageBitmap): Promise<[number, number][]> {
+  let tf: typeof import("@tensorflow/tfjs");
+  let deeplab: typeof import("@tensorflow-models/deeplab");
+
   try {
-    tf = await import(/* @vite-ignore */ tfSpecifier);
-    deeplab = await import(/* @vite-ignore */ deeplabSpecifier);
-  } catch {
+    [tf, deeplab] = await Promise.all([
+      import("@tensorflow/tfjs"),
+      import("@tensorflow-models/deeplab"),
+    ]);
+  } catch (err) {
+    console.error("[auto-detect] ML import failed:", err);
     throw new Error(
-      "Auto-detect needs the optional ML packages. Install them, then restart the dev server:\n" +
-        "npm i @tensorflow/tfjs @tensorflow-models/deeplab --legacy-peer-deps",
+      "Could not load ML libraries. On the dev PC run:\n" +
+        "npm install --legacy-peer-deps\n" +
+        "Then restart: npm run dev",
     );
   }
 
   await tf.ready();
+  // Prefer WebGL; fall back to WASM (more reliable on mobile Chrome).
+  try {
+    await tf.setBackend("webgl");
+    await tf.ready();
+  } catch {
+    await import("@tensorflow/tfjs-backend-wasm");
+    await tf.setBackend("wasm");
+    await tf.ready();
+  }
+
   const model = await deeplab.load({ base: "ade20k", quantizationBytes: 2 });
 
-  // Downscale for speed; DeepLab works well around ~513px on the long edge.
   const maxEdge = 513;
   const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
@@ -47,12 +64,11 @@ export async function detectWallQuad(bitmap: ImageBitmap): Promise<[number, numb
   const input = tf.browser.fromPixels(canvas);
   const pred = model.predict(input);
   const [ph, pw] = pred.shape as [number, number];
-  const labels = (await pred.data()) as ArrayLike<number>; // class indices per pixel
+  const labels = (await pred.data()) as ArrayLike<number>;
   input.dispose();
   pred.dispose();
   model.dispose?.();
 
-  // Bounding box of wall pixels (class 0).
   let minX = pw,
     minY = ph,
     maxX = 0,
@@ -70,7 +86,7 @@ export async function detectWallQuad(bitmap: ImageBitmap): Promise<[number, numb
     }
   }
   if (count < pw * ph * 0.02) {
-    throw new Error("No clear wall detected — place the corners manually.");
+    throw new Error("No clear wall detected — drag the blue corners manually.");
   }
 
   const nx0 = minX / pw,

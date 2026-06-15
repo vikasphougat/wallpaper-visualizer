@@ -33,6 +33,13 @@ export default defineConfig(async () => {
         "@": src,
       },
     },
+    optimizeDeps: {
+      include: [
+        "@tensorflow/tfjs",
+        "@tensorflow/tfjs-backend-wasm",
+        "@tensorflow-models/deeplab",
+      ],
+    },
     server: {
       host: true,
       fs: {

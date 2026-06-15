@@ -1,7 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { TabBar } from "@/components/TabBar";
-import { WallpaperStrip } from "@/components/WallpaperStrip";
+import { WallpaperPicker } from "@/components/WallpaperPicker";
 
 // Lazy-load each feature so heavy engines (WebGL/TF.js) only load on demand.
 const CatalogPage = lazy(() => import("@/features/catalog/CatalogPage"));
@@ -19,8 +19,6 @@ export default function App() {
         <p className="app__tagline">See any wallpaper on your wall — photo, 3D, or live AR.</p>
       </header>
 
-      <WallpaperStrip />
-
       <main className="app__main">
         <Suspense fallback={<div className="loading">Loading…</div>}>
           <Routes>
@@ -34,6 +32,7 @@ export default function App() {
         </Suspense>
       </main>
 
+      <WallpaperPicker />
       <TabBar />
     </div>
   );

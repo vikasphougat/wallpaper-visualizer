@@ -31,7 +31,7 @@ body {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  padding-bottom: 84px; /* room for the tab bar */
+  padding-bottom: 140px; /* tab bar + wallpaper picker */
 }
 
 .app__header { padding: 20px 18px 6px; }
@@ -39,37 +39,207 @@ body {
 .app__logo { color: var(--accent); }
 .app__tagline { margin: 4px 0 0; color: var(--text-dim); font-size: 0.9rem; }
 
-/* ---- Shared wallpaper strip ---- */
+/* ---- Shared wallpaper strip (legacy) ---- */
 .strip {
+  display: none;
+}
+
+/* ---- Bottom wallpaper picker ---- */
+.picker {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 88px;
+  width: min(940px, calc(100% - 24px));
+  z-index: 40;
+  pointer-events: none;
+}
+.picker__panel { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; }
+.picker__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  z-index: -1;
+}
+.picker__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(23, 26, 33, 0.94);
+  backdrop-filter: blur(10px);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.picker__current {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--border);
+}
+.picker__label {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker__chev { opacity: 0.7; font-size: 0.75rem; }
+.picker__tray {
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  padding: 12px 18px;
-  scrollbar-width: thin;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(23, 26, 33, 0.94);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  -webkit-overflow-scrolling: touch;
+  max-height: 120px;
 }
-.strip__swatch {
+.picker__swatch {
   position: relative;
   flex: 0 0 auto;
-  width: 84px;
-  height: 64px;
+  width: 72px;
+  height: 56px;
   border-radius: 10px;
   border: 0;
   cursor: pointer;
-  background-size: 48px 48px;
+  background-size: cover;
+  background-position: center;
   background-color: var(--bg-card);
   outline: 2px solid transparent;
   outline-offset: 2px;
   overflow: hidden;
 }
-.strip__swatch.is-active { outline-color: var(--accent); }
-.strip__name {
+.picker__swatch.is-active { outline-color: var(--accent); }
+.picker__name {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  font-size: 0.62rem;
-  padding: 3px 4px;
+  font-size: 0.58rem;
+  padding: 2px 4px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Photo fullscreen ---- */
+body.photo-fullscreen {
+  overflow: hidden;
+}
+body.photo-fullscreen .app__header,
+body.photo-fullscreen .tabbar,
+body.photo-fullscreen .picker {
+  display: none;
+}
+body.photo-fullscreen .app {
+  padding-bottom: 0;
+  max-width: none;
+}
+body.photo-fullscreen .app__main {
+  padding: 0;
+}
+
+.photo--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+.photo__stage--fullscreen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  border: none;
+  border-radius: 0;
+  background: #000;
+}
+.photo__stage--fullscreen .photo__canvas.is-on {
+  max-width: 100vw;
+  max-height: 100dvh;
+}
+.photo__floatbar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  left: 10px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  z-index: 3;
+  pointer-events: none;
+}
+.photo__floatbtn {
+  pointer-events: auto;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 9px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.controls--float {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 56;
+  max-height: 45vh;
+  overflow-y: auto;
+  background: rgba(29, 33, 43, 0.94);
+  backdrop-filter: blur(10px);
+}
+.photo__toast {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 57;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(29, 33, 43, 0.94);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.page--immersive .page__heading { margin-top: 0; font-size: 1.05rem; }
+.page--immersive .page__sub--compact { margin-bottom: 8px; font-size: 0.82rem; }
+.drawer-toggle {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: center;
+}
+.drawer-toggle:hover { border-color: var(--accent); color: var(--text); }
+.controls__check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
 }
 
 /* ---- Main / pages ---- */
@@ -122,22 +292,46 @@ body {
   overflow: hidden;
   min-height: 220px;
 }
-.photo__canvas { display: none; width: 100%; }
-.photo__canvas.is-on { display: block; }
+.photo__canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  visibility: hidden;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.photo__canvas.is-on {
+  visibility: visible;
+  position: relative;
+  pointer-events: auto;
+}
 
 .dropzone {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-height: 260px;
-  padding: 30px;
+  min-height: min(62vh, 420px);
+  padding: 24px;
   color: var(--text-dim);
-  cursor: pointer;
   text-align: center;
 }
-.dropzone input { display: none; }
+.dropzone__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+.dropzone__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  max-width: 280px;
+  line-height: 1.4;
+}
 .dropzone__glyph {
   font-size: 2.4rem;
   width: 64px; height: 64px;
@@ -219,10 +413,22 @@ body {
   text-decoration: none;
 }
 .btn:hover { border-color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn--primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
 .btn input { display: none; }
 
-.error { color: var(--warn); font-size: 0.85rem; margin: 0; }
+.error { color: var(--warn); font-size: 0.85rem; margin: 0; display: flex; align-items: flex-start; gap: 8px; }
+.error__dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--warn);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 4px;
+  line-height: 1;
+}
+.photo__toast.error { display: flex; align-items: flex-start; gap: 8px; }
 
 /* ---- 3D Room ---- */
 .room { display: flex; flex-direction: column; gap: 14px; }
@@ -233,6 +439,10 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+.room__stage--tall {
+  min-height: min(58vh, 520px);
+  height: min(58vh, 520px);
 }
 .room__canvas { display: block; width: 100%; touch-action: none; }
 .room__busy {
@@ -506,6 +716,14 @@ body {
 @media (max-width: 560px) {
   .placeholder { grid-template-columns: 1fr; }
   .controls__row { grid-template-columns: 1fr; }
+  .app__header { padding: 12px 14px 4px; }
+  .app__tagline { display: none; }
+  .app__main { padding: 2px 12px 12px; }
+  .page--immersive .page__sub--compact { display: none; }
+  .room__stage--tall {
+    min-height: min(52vh, 480px);
+    height: min(52vh, 480px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,3 +1,5 @@
+const MAX_PHOTO_PX = 2560;
+
 /** Load a File/Blob into an ImageBitmap with EXIF orientation already applied. */
 export async function loadOrientedBitmap(file: Blob): Promise<ImageBitmap> {
   try {
@@ -5,6 +7,51 @@ export async function loadOrientedBitmap(file: Blob): Promise<ImageBitmap> {
   } catch {
     // Fallback for engines without imageOrientation support.
     return await createImageBitmap(file);
+  }
+}
+
+function downscaleBitmap(source: ImageBitmap | CanvasImageSource, maxPx: number): Promise<ImageBitmap> {
+  const w = "width" in source ? source.width : (source as HTMLImageElement).naturalWidth;
+  const h = "height" in source ? source.height : (source as HTMLImageElement).naturalHeight;
+  if (Math.max(w, h) <= maxPx) {
+    if (source instanceof ImageBitmap) return Promise.resolve(source);
+    return createImageBitmap(source);
+  }
+  const scale = maxPx / Math.max(w, h);
+  const cw = Math.max(1, Math.round(w * scale));
+  const ch = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(source, 0, 0, cw, ch);
+  if (source instanceof ImageBitmap) source.close();
+  return createImageBitmap(canvas);
+}
+
+/**
+ * Load a camera/gallery pick on mobile: validates size, applies EXIF rotation,
+ * downscales huge shots, and falls back to canvas decode when createImageBitmap fails.
+ */
+export async function preparePhotoBitmap(file: File): Promise<ImageBitmap> {
+  if (!file.size) {
+    throw new Error("No image received — tap OK after taking the photo, or pick from gallery.");
+  }
+  if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)) {
+    throw new Error("That file is not a supported image.");
+  }
+
+  try {
+    const bmp = await loadOrientedBitmap(file);
+    return downscaleBitmap(bmp, MAX_PHOTO_PX);
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImage(url);
+      return downscaleBitmap(img, MAX_PHOTO_PX);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 }
 

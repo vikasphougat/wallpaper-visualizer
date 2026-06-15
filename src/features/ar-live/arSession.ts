@@ -313,6 +313,12 @@ export class ARSession {
    */
   setUseAnchors(on: boolean) {
     this.useAnchors = on;
+    if (!on) {
+      for (const p of this.placed) {
+        p.anchor?.delete?.();
+        p.anchor = undefined;
+      }
+    }
   }
 
   get isUsingAnchors(): boolean {

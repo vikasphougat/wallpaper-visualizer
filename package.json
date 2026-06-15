@@ -11,6 +11,9 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@tensorflow-models/deeplab": "^0.2.2",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.0.0",

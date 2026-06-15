@@ -17,8 +17,8 @@ node -v
 echo npm:
 npm -v
 echo.
-echo Installing dependencies...
-call npm install --no-audit --no-fund
+echo Installing dependencies (including ML for auto-detect)...
+call npm install --legacy-peer-deps --no-audit --no-fund
 if errorlevel 1 (
   echo.
   echo ERROR: npm install failed. See messages above.
