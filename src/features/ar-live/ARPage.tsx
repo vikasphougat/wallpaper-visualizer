@@ -241,8 +241,13 @@ export default function ARPage() {
   }
 
   function adjustScale(v: number) {
-    setArScale(v);
-    sessionRef.current?.setScale(v);
+    const clamped = Math.min(6, Math.max(0.3, Number(v.toFixed(2))));
+    setArScale(clamped);
+    sessionRef.current?.setScale(clamped);
+  }
+
+  function zoomBy(delta: number) {
+    adjustScale(arScale + delta);
   }
   function adjustRotation(v: number) {
     setArRotation(v);
@@ -331,76 +336,107 @@ export default function ARPage() {
           </div>
         )}
 
-        <div className="ar-overlay__top">
-          <button className="ar-overlay__exit" onClick={() => sessionRef.current?.end()}>✕ Exit</button>
-          <span className="ar-overlay__chip">
+        <div className="ar-hud__top">
+          <button
+            className="ar-hud__icon ar-hud__icon--exit"
+            onClick={() => sessionRef.current?.end()}
+            aria-label="Exit AR"
+            title="Exit"
+          >
+            ✕
+          </button>
+          <span className="ar-hud__chip">
             {compareMode ? `${current.name} vs ${compareWall?.name ?? "…"}` : current.name}
-            {count > 0 && <span className="ar-overlay__badge"> · {count} placed</span>}
-            {useAnchors && anchorsAvailable && (
-              <span className="ar-overlay__badge" title="XR anchors active"> · locked</span>
-            )}
-            {wallFit && coverMode && <span className="ar-overlay__badge" title="Auto fill wall"> · fill</span>}
-            {compareMode && <span className="ar-overlay__badge"> · compare</span>}
+            {count > 0 && <span className="ar-hud__badge"> · {count}</span>}
+            {useAnchors && anchorsAvailable && <span className="ar-hud__badge" title="Locked to wall"> 🔒</span>}
+            {wallFit && coverMode && <span className="ar-hud__badge" title="Fill wall"> ▦</span>}
           </span>
+          <button
+            className="ar-hud__icon"
+            onClick={snapshot}
+            aria-label="Snapshot"
+            title="Snapshot"
+          >
+            ⤓
+          </button>
         </div>
 
-        <div className="ar-overlay__hint">
+        {/* Right vertical rail: zoom + minimal toggles (Snapchat-style) */}
+        <div className="ar-rail">
+          <button
+            className="ar-rail__btn"
+            onClick={() => zoomBy(0.2)}
+            aria-label="Zoom in"
+            title="Zoom in (bigger pattern)"
+          >
+            +
+          </button>
+          <span className="ar-rail__val">{arScale.toFixed(1)}×</span>
+          <button
+            className="ar-rail__btn"
+            onClick={() => zoomBy(-0.2)}
+            aria-label="Zoom out"
+            title="Zoom out (smaller pattern)"
+          >
+            −
+          </button>
+
+          <span className="ar-rail__sep" aria-hidden />
+
+          <button
+            className={`ar-rail__btn ar-rail__btn--toggle${coverMode ? " is-on" : ""}`}
+            onClick={toggleCover}
+            aria-label="Fill wall"
+            aria-pressed={coverMode}
+            title="Fill wall"
+          >
+            ▦
+          </button>
+          <button
+            className={`ar-rail__btn ar-rail__btn--toggle${compareMode ? " is-on" : ""}`}
+            onClick={toggleCompare}
+            aria-label="Compare two wallpapers"
+            aria-pressed={compareMode}
+            title="Compare"
+          >
+            ◧
+          </button>
+          {anchorsAvailable && (
+            <button
+              className={`ar-rail__btn ar-rail__btn--toggle${useAnchors ? " is-on" : ""}`}
+              onClick={toggleAnchors}
+              aria-label="Lock wallpaper to wall"
+              aria-pressed={useAnchors}
+              title="Lock to wall"
+            >
+              {useAnchors ? "🔒" : "🔓"}
+            </button>
+          )}
+          {savedCount > 0 && (
+            <button
+              className="ar-rail__btn"
+              onClick={restoreLayout}
+              aria-label="Restore saved layout"
+              title={`Restore ${savedCount} saved`}
+            >
+              ↺
+            </button>
+          )}
+        </div>
+
+        <div className="ar-hud__hint">
           {phase === "starting" && "Starting AR…"}
           {phase === "scanning" &&
             (reticle
               ? compareMode
-                ? "Tap wall to compare two wallpapers side-by-side"
+                ? "Tap wall to compare side-by-side"
                 : coverMode
                   ? "Tap wall to auto-fill edge-to-edge"
-                  : useAnchors
-                    ? "Tap to place · Lock wall keeps it fixed when you move"
-                    : "Tap to place wallpaper · drag corners to fit"
+                  : "Tap to place · drag corners to fit"
               : "Aim at the wall and move slowly")}
-          {phase === "placed" && "Drag corners/edges · optional Lock wall / Fill wall / Compare below"}
         </div>
 
         <div className="ar-overlay__bottom">
-          <div className="ar-overlay__pickbar">
-            <button
-              className={`ar-overlay__arrow${pickerOpen ? " is-on" : ""}`}
-              onClick={toggleWallpaperTray}
-            >
-              {pickerOpen ? "▾" : "▴"} Wallpaper
-            </button>
-            <button
-              className={`ar-overlay__arrow${adjustOpen ? " is-on" : ""}`}
-              onClick={toggleAdjustTray}
-            >
-              {adjustOpen ? "▾" : "▴"} Adjust
-            </button>
-            <button
-              className={`ar-overlay__toggle${coverMode ? " is-on" : ""}`}
-              onClick={toggleCover}
-            >
-              {coverMode ? "✓ " : ""}Fill wall
-            </button>
-            <button
-              className={`ar-overlay__toggle${compareMode ? " is-on" : ""}`}
-              onClick={toggleCompare}
-            >
-              {compareMode ? "✓ " : ""}Compare
-            </button>
-            {anchorsAvailable && (
-              <button
-                className={`ar-overlay__toggle${useAnchors ? " is-on" : ""}`}
-                onClick={toggleAnchors}
-                title="Lock wallpaper to the real wall (XR anchors)"
-              >
-                {useAnchors ? "✓ " : ""}Lock wall
-              </button>
-            )}
-            {savedCount > 0 && (
-              <button className="ar-overlay__toggle" onClick={restoreLayout}>
-                ↺ Restore ({savedCount})
-              </button>
-            )}
-          </div>
-
           {pickerOpen && (
             <div className="ar-overlay__tray">
               {compareMode && (
@@ -457,19 +493,49 @@ export default function ARPage() {
                 <span className="ar-overlay__val">{Math.round((1 - arOpacity) * 100)}%</span>
               </label>
               <div className="ar-overlay__buttons">
-                <button className="btn btn--primary" onClick={() => sessionRef.current?.placeInFront()}>
-                  Place here
-                </button>
                 <button className="btn btn--danger" onClick={() => sessionRef.current?.removeSelected()}>
                   Delete
                 </button>
                 <button className="btn" onClick={() => sessionRef.current?.removeLast()}>Undo</button>
                 <button className="btn" onClick={() => sessionRef.current?.clearPlaced()}>Clear</button>
-                <button className="btn" onClick={snapshot}>Snapshot</button>
                 <button className="btn" onClick={exportBeforeAfter}>Before/After</button>
               </div>
             </div>
           )}
+
+          {/* Minimal Snapchat-style dock: wallpaper · place shutter · adjust */}
+          <div className="ar-dock">
+            <button
+              className={`ar-dock__side${pickerOpen ? " is-on" : ""}`}
+              onClick={toggleWallpaperTray}
+              aria-label="Choose wallpaper"
+              title="Wallpaper"
+            >
+              <span
+                className="ar-dock__thumb"
+                style={{ backgroundImage: `url("${current.texture}")` }}
+                aria-hidden
+              />
+            </button>
+
+            <button
+              className="ar-dock__shutter"
+              onClick={() => sessionRef.current?.placeInFront()}
+              aria-label="Place wallpaper here"
+              title="Place here"
+            >
+              <span className="ar-dock__shutter-ring" aria-hidden />
+            </button>
+
+            <button
+              className={`ar-dock__side ar-dock__side--icon${adjustOpen ? " is-on" : ""}`}
+              onClick={toggleAdjustTray}
+              aria-label="Adjust wallpaper"
+              title="Adjust"
+            >
+              ⫶
+            </button>
+          </div>
         </div>
       </div>
     </section>

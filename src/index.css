@@ -512,38 +512,97 @@ body.photo-fullscreen .app__main {
   padding: 14px;
 }
 .ar-overlay.is-on { display: flex; }
-.ar-overlay__top {
+/* ---- Snapchat-style minimal HUD ---- */
+.ar-hud__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
-.ar-overlay__exit {
+.ar-hud__icon {
   pointer-events: auto;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
   border: none;
-  background: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.4);
   color: #fff;
-  padding: 10px 14px;
-  border-radius: 999px;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   cursor: pointer;
+  backdrop-filter: blur(6px);
 }
-.ar-overlay__chip {
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 0.8rem;
-}
-.ar-overlay__badge { color: var(--ok); }
-.ar-overlay__hint {
-  align-self: center;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  padding: 10px 16px;
-  border-radius: 12px;
-  font-size: 0.9rem;
+.ar-hud__icon:active { transform: scale(0.92); }
+.ar-hud__chip {
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: center;
+  color: #fff;
+  font-size: 0.8rem;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ar-hud__badge { color: var(--ok); }
+
+/* Right vertical rail (zoom + minimal toggles) */
+.ar-rail {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  z-index: 3;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.ar-rail__btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.ar-rail__btn:active { transform: scale(0.92); }
+.ar-rail__btn--toggle { font-size: 1.15rem; }
+.ar-rail__btn--toggle.is-on {
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+.ar-rail__val {
+  color: #fff;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.ar-rail__sep {
+  width: 22px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  margin: 2px 0;
+}
+
+.ar-hud__hint {
+  align-self: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  text-align: center;
+  pointer-events: none;
 }
 .ar-overlay__controls {
   pointer-events: auto;
@@ -596,11 +655,64 @@ body.photo-fullscreen .app__main {
 .ar-handle--corner { width: 22px; height: 22px; }
 .ar-handle--edge { width: 14px; height: 14px; background: rgba(255, 255, 255, 0.9); border-color: var(--accent); }
 /* Lift the interactive chrome above the gesture layer. */
-.ar-overlay__top,
-.ar-overlay__hint,
+.ar-hud__top,
+.ar-hud__hint,
 .ar-overlay__bottom { position: relative; z-index: 2; }
 
 .ar-overlay__bottom { display: flex; flex-direction: column; gap: 10px; }
+
+/* Minimal bottom dock: wallpaper thumb · place shutter · adjust */
+.ar-dock {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+}
+.ar-dock__side {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.ar-dock__side.is-on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.ar-dock__side--icon { font-size: 1.5rem; letter-spacing: 2px; }
+.ar-dock__thumb {
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+}
+.ar-dock__shutter {
+  flex: 0 0 auto;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.ar-dock__shutter-ring {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.35);
+  transition: transform 0.1s ease;
+}
+.ar-dock__shutter:active .ar-dock__shutter-ring { transform: scale(0.88); }
 
 .ar-overlay__pickbar { display: flex; gap: 8px; pointer-events: auto; flex-wrap: wrap; }
 .ar-overlay__arrow,
