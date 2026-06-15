@@ -12,7 +12,21 @@ This repo is the **MVP**: the app shell + a fully working **Solution A (2D photo
 Solutions B and C are intentionally scaffolded as informative placeholders (the AR tab already
 feature-detects WebXR).
 
-## Quick start
+## React Native app (iOS / Android)
+
+A full **Expo** mobile app lives in [`mobile/`](mobile/). It mirrors the four tabs (Photo, 3D Room, Live AR, Browse) with native UI:
+
+```bash
+cd mobile
+npm install
+npx expo start
+```
+
+See [`mobile/README.md`](mobile/README.md) for the stack (Skia, react-three-fiber, expo-camera) and dev-build notes for camera / 3D / production AR.
+
+The web app (`npm run dev`) remains available for desktop and WebXR on Android Chrome.
+
+## Quick start (web)
 
 ```bash
 npm install
@@ -161,7 +175,7 @@ tracking error can't permanently stop AR.
 - **Phase 6 — Anchors, fill, compare, export, scale & catalog sync:** done — XR anchors, auto Fill
   wall on tap, Compare mode (A/B split), Before/After export, physical scale (1.04 m roll), dynamic
   Marshalls Shopify catalog sync.
-- **Phase 7 — iOS native:** scaffold in `mobile/wallpaper-ar/` (Expo); full ARKit placement next.
+- **Phase 7 — iOS / Android native:** Expo app in `mobile/` (Photo Skia overlay, r3f room, camera AR shell, catalog sync). Full ARKit/ARCore plane detection via dev build + ViroReact next.
 
 > **See [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) for the full, serial step-by-step
 > plan** (every step, in order, with status and the files it touches).

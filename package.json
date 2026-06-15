@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "mobile": "cd mobile && npx expo start",
+    "mobile:install": "cd mobile && npm install"
   },
   "dependencies": {
     "@tensorflow-models/deeplab": "^0.2.2",

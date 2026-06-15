@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "Wallpaper Visualizer",
+    "slug": "wallpaper-visualizer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "wallviz",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f1115"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wallviz.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Place wallpaper on your walls in live AR.",
+        "NSPhotoLibraryUsageDescription": "Pick room photos to preview wallpaper."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f1115"
+      },
+      "package": "com.wallviz.app",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      "@reactvision/react-viro",
+      "./plugins/withViroEmulatorGuard.js",
+      [
+        "react-native-fast-tflite",
+        {
+          "enableCoreMLDelegate": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Wallpaper Visualizer to use your camera for AR preview."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow access to pick room photos."
+        }
+      ],
+      "expo-asset",
+      "expo-sqlite"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
