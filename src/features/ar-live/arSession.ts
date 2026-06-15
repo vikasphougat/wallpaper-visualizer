@@ -57,8 +57,10 @@ export interface ARStartOptions {
   onDepth?: (enabled: boolean) => void;
   /** True when WebXR plane-detection is active (enables edge-to-edge fitting). */
   onWallFit?: (available: boolean) => void;
-  /** True when the device supports WebXR anchors (user can opt in via the Lock button). */
+  /** True when the device supports WebXR anchors. */
   onAnchorsAvailable?: (available: boolean) => void;
+  /** Camera digital zoom factor (1 = normal). */
+  onViewZoom?: (zoom: number) => void;
   physicalRepeatCm?: [number, number];
   /** Fires when the selected patch changes (or is cleared) so the UI can sync. */
   onSelectPatch?: (info: PatchInfo | null) => void;
@@ -95,6 +97,8 @@ interface PlacedPatch {
   physicalRepeatCm: [number, number];
   /** WebXR anchor — keeps the patch locked to the real wall during the session. */
   anchor?: any;
+  /** Offset from anchor base pose (for compare side-by-side patches). */
+  anchorOffset?: THREE.Matrix4;
   compareGroupId?: string;
 }
 
@@ -111,6 +115,9 @@ const TAP_MOVE_PX = 10;
 const TAP_MS = 500;
 const HANDLE_HIT_PX = 52;
 const MAX_WALL_M = 8;
+const VIEW_ZOOM_MIN = 0.6;
+const VIEW_ZOOM_MAX = 2.4;
+const VIEW_ZOOM_STEP = 0.12;
 
 type DragMode =
   | { kind: "move" }
@@ -138,7 +145,7 @@ export class ARSession {
   private currentId: string | undefined;
   private currentTileable = true;
   private physicalRepeatCm: [number, number] = [53, 53];
-  private coverMode = false;
+  private coverMode = true;
   private compareMode = false;
   private compareB = { url: "", id: "", tileable: true, physicalRepeatCm: [104, 104] as [number, number] };
 
@@ -146,8 +153,9 @@ export class ARSession {
   private lastHitResult: any = null;
   /** Device supports WebXR anchors. */
   private anchorsAvailable = false;
-  /** User opted in — only then create/update anchors. Default off. */
-  private useAnchors = false;
+  /** When true, create/update anchors on placement (auto on if device supports). */
+  private useAnchors = true;
+  private viewZoom = 1;
   private beforeSnapshot: string | null = null;
   private beforeCaptured = false;
   private localSpace: any = null;
@@ -216,6 +224,7 @@ export class ARSession {
     this.scene.add(this.reticle);
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 1));
+    this.scene.onBeforeRender = () => this.applyViewZoomToXRCamera();
 
     const xrLight = new XREstimatedLight(renderer);
     xrLight.addEventListener("estimationstart", () => {
@@ -264,8 +273,10 @@ export class ARSession {
     opts.onDepth?.(Boolean(opts.enableOcclusion && session.depthUsage && session.depthDataFormat));
     this.planeDetection = (session.enabledFeatures ?? []).includes("plane-detection");
     this.anchorsAvailable = (session.enabledFeatures ?? []).includes("anchors");
+    if (this.anchorsAvailable) this.useAnchors = true;
     opts.onWallFit?.(this.planeDetection);
     opts.onAnchorsAvailable?.(this.anchorsAvailable);
+    opts.onViewZoom?.(this.viewZoom);
 
     const viewerSpace = await session.requestReferenceSpace("viewer");
     this.localSpace = await session.requestReferenceSpace("local");
@@ -308,16 +319,51 @@ export class ARSession {
   }
 
   /**
-   * Opt in to XR anchors so placed wallpaper locks to the real wall.
-   * Off by default — normal tap-to-place works without anchors.
+   * Enable/disable XR anchors. On by default when the device supports them.
    */
   setUseAnchors(on: boolean) {
-    this.useAnchors = on;
-    if (!on) {
+    this.useAnchors = on && this.anchorsAvailable;
+    if (!this.useAnchors) {
       for (const p of this.placed) {
         p.anchor?.delete?.();
         p.anchor = undefined;
+        p.anchorOffset = undefined;
       }
+    }
+  }
+
+  /** Digital camera zoom (WebXR passthrough). 1 = normal, >1 = zoom in. */
+  adjustViewZoom(delta: number) {
+    const next = Math.min(
+      VIEW_ZOOM_MAX,
+      Math.max(VIEW_ZOOM_MIN, Number((this.viewZoom + delta).toFixed(2))),
+    );
+    if (next === this.viewZoom) return;
+    this.viewZoom = next;
+    this.opts?.onViewZoom?.(this.viewZoom);
+  }
+
+  getViewZoom(): number {
+    return this.viewZoom;
+  }
+
+  private applyViewZoomToXRCamera() {
+    if (!this.renderer || this.viewZoom === 1) return;
+    const cam = this.renderer.xr.getCamera();
+    const z = this.viewZoom;
+    const tweak = (c: THREE.PerspectiveCamera) => {
+      const e = c.projectionMatrix.elements;
+      e[0] *= z;
+      e[5] *= z;
+    };
+    if ((cam as THREE.ArrayCamera).isArrayCamera) {
+      for (const c of (cam as THREE.ArrayCamera).cameras) {
+        if ((c as THREE.PerspectiveCamera).isPerspectiveCamera) {
+          tweak(c as THREE.PerspectiveCamera);
+        }
+      }
+    } else if ((cam as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      tweak(cam as THREE.PerspectiveCamera);
     }
   }
 
@@ -588,6 +634,7 @@ export class ARSession {
       rotDeg: 0,
       opacity: 1,
       anchor,
+      anchorRefPose: usePose,
       emit: true,
     });
     this.opts?.onPlaced?.();
@@ -609,7 +656,9 @@ export class ARSession {
     const halfW = size[0] * 0.5;
     const h = size[1];
     const groupId = `cmp-${Date.now()}`;
-    const anchor = await this.createAnchorFromLastHit();
+    const anchorRef = usePose.clone();
+    const anchorA = await this.createAnchorFromLastHit();
+    const anchorB = await this.createAnchorFromLastHit();
 
     const leftPose = usePose.clone();
     this.setPosePositionMatrix(leftPose, center.clone().add(right.clone().multiplyScalar(-size[0] * 0.25)));
@@ -627,7 +676,8 @@ export class ARSession {
       scaleY: 1,
       rotDeg: 0,
       opacity: 1,
-      anchor,
+      anchor: anchorA,
+      anchorRefPose: anchorRef,
       compareGroupId: groupId,
       emit: false,
     });
@@ -642,6 +692,8 @@ export class ARSession {
       scaleY: 1,
       rotDeg: 0,
       opacity: 1,
+      anchor: anchorB ?? anchorA,
+      anchorRefPose: anchorRef,
       compareGroupId: groupId,
       emit: true,
     });
@@ -686,6 +738,7 @@ export class ARSession {
     rotDeg: number;
     opacity: number;
     anchor?: any;
+    anchorRefPose?: THREE.Matrix4;
     compareGroupId?: string;
     emit: boolean;
   }) {
@@ -738,6 +791,10 @@ export class ARSession {
       tileable: o.tileable,
       physicalRepeatCm: o.physicalRepeatCm,
       anchor: o.anchor,
+      anchorOffset:
+        o.anchor && o.anchorRefPose
+          ? o.anchorRefPose.clone().invert().multiply(o.pose.clone())
+          : undefined,
       compareGroupId: o.compareGroupId,
     };
     this.placed.push(patch);
@@ -963,7 +1020,12 @@ export class ARSession {
       const m = new THREE.Matrix4().fromArray(anchorPose.transform.matrix);
       const pos = new THREE.Vector3().setFromMatrixPosition(m);
       const nrm = new THREE.Vector3().setFromMatrixColumn(m, 1).normalize();
-      p.pose.copy(this.wallPose(pos, nrm));
+      const basePose = this.wallPose(pos, nrm);
+      if (p.anchorOffset) {
+        p.pose.copy(basePose.clone().multiply(p.anchorOffset));
+      } else {
+        p.pose.copy(basePose);
+      }
       this.applyTransform(p);
     }
   }
@@ -1277,7 +1339,8 @@ export class ARSession {
     this.lastHitResult = null;
     this.beforeCaptured = false;
     this.beforeSnapshot = null;
-    this.useAnchors = false;
+    this.useAnchors = true;
+    this.viewZoom = 1;
     this.anchorsAvailable = false;
     this.pointers.clear();
   }

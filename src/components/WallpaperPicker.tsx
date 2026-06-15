@@ -11,8 +11,8 @@ export function WallpaperPicker() {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
 
-  // AR has its own in-session wallpaper tray.
-  if (pathname === "/ar") return null;
+  // AR and Photo use in-session wallpaper trays.
+  if (pathname === "/ar" || pathname === "/photo") return null;
 
   return (
     <div className={`picker${open ? " is-open" : ""}`}>

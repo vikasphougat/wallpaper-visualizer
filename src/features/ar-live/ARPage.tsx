@@ -34,7 +34,8 @@ export default function ARPage() {
   const [occlusion, setOcclusion] = useState(false);
   const [wallFit, setWallFit] = useState(false);
   const [anchorsAvailable, setAnchorsAvailable] = useState(false);
-  const [useAnchors, setUseAnchors] = useState(false);
+  const [useAnchors, setUseAnchors] = useState(true);
+  const [viewZoom, setViewZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [count, setCount] = useState(0);
 
@@ -48,7 +49,7 @@ export default function ARPage() {
   const [pickTarget, setPickTarget] = useState<"a" | "b">("a");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
-  const [coverMode, setCoverMode] = useState(false);
+  const [coverMode, setCoverMode] = useState(true);
   const [compareMode, setCompareMode] = useState(false);
   const [savedCount, setSavedCount] = useState(() => readJSON<SerializedPatch[]>(LAYOUT_KEY, []).length);
   const [handles, setHandles] = useState<HandleOverlay | null>(null);
@@ -110,7 +111,14 @@ export default function ARPage() {
       onReticle: (v) => setReticle(v),
       onDepth: (v) => setOcclusion(v),
       onWallFit: (v) => setWallFit(v),
-      onAnchorsAvailable: (v) => setAnchorsAvailable(v),
+      onAnchorsAvailable: (v) => {
+        setAnchorsAvailable(v);
+        if (v) {
+          setUseAnchors(true);
+          sessionRef.current?.setUseAnchors(true);
+        }
+      },
+      onViewZoom: setViewZoom,
       onCountChange: (n) => setCount(n),
       onPlaced: () => setPhase("placed"),
       onSelectPatch: (info) => {
@@ -139,7 +147,8 @@ export default function ARPage() {
         setOcclusion(false);
         setWallFit(false);
         setAnchorsAvailable(false);
-        setUseAnchors(false);
+        setUseAnchors(true);
+        setViewZoom(1);
         setCount(0);
         setHandles(null);
         sessionRef.current = null;
@@ -246,8 +255,8 @@ export default function ARPage() {
     sessionRef.current?.setScale(clamped);
   }
 
-  function zoomBy(delta: number) {
-    adjustScale(arScale + delta);
+  function zoomCamera(delta: number) {
+    sessionRef.current?.adjustViewZoom(delta);
   }
   function adjustRotation(v: number) {
     setArRotation(v);
@@ -277,6 +286,11 @@ export default function ARPage() {
   }
 
   const inSession = phase === "scanning" || phase === "placed" || phase === "starting";
+
+  useEffect(() => {
+    document.body.classList.toggle("ar-immersive", inSession);
+    return () => document.body.classList.remove("ar-immersive");
+  }, [inSession]);
 
   return (
     <section className="page">
@@ -348,7 +362,9 @@ export default function ARPage() {
           <span className="ar-hud__chip">
             {compareMode ? `${current.name} vs ${compareWall?.name ?? "…"}` : current.name}
             {count > 0 && <span className="ar-hud__badge"> · {count}</span>}
-            {useAnchors && anchorsAvailable && <span className="ar-hud__badge" title="Locked to wall"> 🔒</span>}
+            {useAnchors && anchorsAvailable && (
+              <span className="ar-hud__badge" title="XR anchors active"> · anchored</span>
+            )}
             {wallFit && coverMode && <span className="ar-hud__badge" title="Fill wall"> ▦</span>}
           </span>
           <button
@@ -365,18 +381,18 @@ export default function ARPage() {
         <div className="ar-rail">
           <button
             className="ar-rail__btn"
-            onClick={() => zoomBy(0.2)}
+            onClick={() => zoomCamera(0.12)}
             aria-label="Zoom in"
-            title="Zoom in (bigger pattern)"
+            title="Zoom camera in"
           >
             +
           </button>
-          <span className="ar-rail__val">{arScale.toFixed(1)}×</span>
+          <span className="ar-rail__val">{Math.round(viewZoom * 100)}%</span>
           <button
             className="ar-rail__btn"
-            onClick={() => zoomBy(-0.2)}
+            onClick={() => zoomCamera(-0.12)}
             aria-label="Zoom out"
-            title="Zoom out (smaller pattern)"
+            title="Zoom camera out"
           >
             −
           </button>

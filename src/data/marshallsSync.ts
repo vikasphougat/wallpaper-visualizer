@@ -87,7 +87,7 @@ export async function fetchMarshallsCatalog(): Promise<Wallpaper[]> {
       }
       if (batch.length < 250) break;
       page++;
-      if (page > 20) break; // safety cap
+      if (page > 40) break; // safety cap (~10k products)
     }
   } catch {
     /* network / CORS in dev — use fallback */
