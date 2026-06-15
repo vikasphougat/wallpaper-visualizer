@@ -5,6 +5,7 @@ import { loadImage, preparePhotoBitmap, meanLuminance } from "@/lib/image";
 import { defaultQuad } from "@/lib/homography";
 import { createOverlayRenderer, type OverlayRenderer } from "./overlayRenderer";
 import { CornerHandles } from "./CornerHandles";
+import { upscaleMaskToPhoto } from "./wallMask";
 
 const MAX_DPR = 2;
 const VIEW_ZOOM_MIN = 0.6;
@@ -22,6 +23,7 @@ export default function PhotoOverlayPage() {
   const rendererRef = useRef<OverlayRenderer | null>(null);
   const bitmapRef = useRef<ImageBitmap | null>(null);
   const meanLumRef = useRef(0.5);
+  const wallMaskRef = useRef<{ mask: Uint8Array; w: number; h: number } | null>(null);
 
   const [quad, setQuad] = useState<[number, number][]>(defaultQuad());
   const [hasPhoto, setHasPhoto] = useState(false);
@@ -31,8 +33,27 @@ export default function PhotoOverlayPage() {
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [viewZoom, setViewZoom] = useState(1);
   const [mlReady, setMlReady] = useState<boolean | null>(null);
+  const [smartMask, setSmartMask] = useState(true);
+  const [maskReady, setMaskReady] = useState(false);
+
+  const uploadMask = useCallback(() => {
+    const renderer = rendererRef.current;
+    const canvas = canvasRef.current;
+    const bmp = bitmapRef.current;
+    const stored = wallMaskRef.current;
+    if (!renderer || !canvas || !bmp || !stored || !smartMask) {
+      renderer?.setWallMask(null, 0, 0);
+      return;
+    }
+    let data = upscaleMaskToPhoto(stored.mask, stored.w, stored.h, bmp.width, bmp.height);
+    if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+      data = upscaleMaskToPhoto(data, bmp.width, bmp.height, canvas.width, canvas.height);
+    }
+    renderer.setWallMask(data, canvas.width, canvas.height);
+  }, [smartMask]);
 
   const draw = useCallback(() => {
+    uploadMask();
     rendererRef.current?.render({
       quad,
       scale,
@@ -41,7 +62,7 @@ export default function PhotoOverlayPage() {
       opacity,
       meanLum: meanLumRef.current,
     });
-  }, [quad, scale, rotationDeg, blend, opacity]);
+  }, [quad, scale, rotationDeg, blend, opacity, uploadMask]);
 
   useEffect(() => {
     import("./segmentation").then((m) => m.isMlAvailable().then(setMlReady));
@@ -114,7 +135,13 @@ export default function PhotoOverlayPage() {
       rendererRef.current!.setWallpaper(wp);
 
       setQuad(defaultQuad());
+      wallMaskRef.current = null;
+      setMaskReady(false);
       resizeCanvas();
+
+      if (mlReady !== false) {
+        void applySmartWallpaper(bmp);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load that image.");
     } finally {
@@ -140,16 +167,27 @@ export default function PhotoOverlayPage() {
     if (hasPhoto) resizeCanvas();
   }, [hasPhoto, resizeCanvas]);
 
-  async function onAutoDetect() {
-    if (!bitmapRef.current) return;
+  useEffect(() => {
+    if (hasPhoto) draw();
+  }, [smartMask, hasPhoto, draw]);
+
+  async function applySmartWallpaper(source?: ImageBitmap) {
+    const bmp = source ?? bitmapRef.current;
+    if (!bmp) return;
     setError(null);
-    setBusy("Detecting wall…");
+    setBusy("Analyzing wall & objects… (first run downloads ~5 MB model)");
     try {
-      const { detectWallQuad } = await import("./segmentation");
-      const q = await detectWallQuad(bitmapRef.current);
-      setQuad(q);
+      const { segmentWallMask } = await import("./segmentation");
+      const result = await segmentWallMask(bmp);
+      wallMaskRef.current = { mask: result.mask, w: result.maskWidth, h: result.maskHeight };
+      setQuad(result.quad);
+      setMaskReady(true);
+      setSmartMask(true);
+      draw();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Auto-detect failed.");
+      setError(e instanceof Error ? e.message : "Smart placement failed — drag corners manually.");
+      wallMaskRef.current = null;
+      setMaskReady(false);
     } finally {
       setBusy(null);
     }
@@ -177,7 +215,10 @@ export default function PhotoOverlayPage() {
     rendererRef.current = null;
     bitmapRef.current?.close();
     bitmapRef.current = null;
+    wallMaskRef.current = null;
     setHasPhoto(false);
+    setMaskReady(false);
+    setSmartMask(true);
     setQuad(defaultQuad());
     setPickerOpen(false);
     setAdjustOpen(false);
@@ -353,10 +394,10 @@ export default function PhotoOverlayPage() {
         <button
           type="button"
           className="ar-rail__btn"
-          onClick={onAutoDetect}
+          onClick={() => applySmartWallpaper()}
           disabled={mlReady === false}
-          aria-label="Auto-detect wall"
-          title={mlReady === false ? "ML packages not installed on dev server" : "Auto-detect wall"}
+          aria-label="Smart wall placement"
+          title={mlReady === false ? "ML packages not installed on dev server" : "Re-run smart wall detection"}
         >
           ◫
         </button>
@@ -371,7 +412,9 @@ export default function PhotoOverlayPage() {
       </div>
 
       <div className="ar-hud__hint photo-hud__chrome">
-        Drag corners to fit the wall
+        {maskReady
+          ? "Smart cutouts active · drag corners to refine"
+          : "Tap ◫ or shutter to detect wall & objects"}
       </div>
 
       <div className="photo-hud__bottom photo-hud__chrome">
@@ -428,7 +471,21 @@ export default function PhotoOverlayPage() {
               />
               <span className="ar-overlay__val">{Math.round(opacity * 100)}%</span>
             </label>
+            <label className="controls__check">
+              <input
+                type="checkbox"
+                checked={smartMask}
+                onChange={(e) => {
+                  setSmartMask(e.target.checked);
+                  requestAnimationFrame(() => draw());
+                }}
+              />
+              Object-aware cutouts (doors, windows, fixtures)
+            </label>
             <div className="ar-overlay__buttons">
+              <button type="button" className="btn" onClick={() => applySmartWallpaper()}>
+                Re-detect wall
+              </button>
               <button type="button" className="btn" onClick={() => cameraRef.current?.click()}>Retake</button>
               <button type="button" className="btn" onClick={() => galleryRef.current?.click()}>Gallery</button>
               <button type="button" className="btn btn--primary" onClick={onExport}>Download PNG</button>
@@ -452,8 +509,8 @@ export default function PhotoOverlayPage() {
           <button
             type="button"
             className="ar-dock__shutter"
-            onClick={onAutoDetect}
-            aria-label="Auto-detect wall"
+            onClick={() => applySmartWallpaper()}
+            aria-label="Smart wall placement"
           >
             <span className="ar-dock__shutter-ring" aria-hidden />
           </button>

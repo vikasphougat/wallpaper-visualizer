@@ -32,13 +32,20 @@ in vec2 vScreenUV;
 out vec4 fragColor;
 uniform sampler2D uWall;
 uniform sampler2D uPhoto;
+uniform sampler2D uMask;
 uniform vec2 uRepeat;
 uniform float uRot;
 uniform float uBlend;
 uniform float uOpacity;
 uniform float uMeanLum;
+uniform float uUseMask;
 float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 void main() {
+  float maskA = 1.0;
+  if (uUseMask > 0.5) {
+    maskA = texture(uMask, vScreenUV).r;
+    if (maskA < 0.04) discard;
+  }
   vec2 p = vUV - 0.5;
   float ca = cos(uRot), sa = sin(uRot);
   p = vec2(ca * p.x - sa * p.y, sa * p.x + ca * p.y);
@@ -47,7 +54,7 @@ void main() {
   float L = lum(texture(uPhoto, vScreenUV).rgb);
   float f = mix(1.0, L / max(uMeanLum, 0.001), uBlend);
   vec3 col = clamp(wp.rgb * f, 0.0, 1.0);
-  fragColor = vec4(col, wp.a * uOpacity);
+  fragColor = vec4(col, wp.a * uOpacity * maskA);
 }`;
 
 const FRAG_PHOTO = `#version 300 es
@@ -105,6 +112,8 @@ function makeTexture(
 export interface OverlayRenderer {
   setPhoto(bitmap: TexImageSource): void;
   setWallpaper(image: TexImageSource): void;
+  /** Object-aware wall mask (0–255 per pixel, same aspect as photo). */
+  setWallMask(data: Uint8Array | null, width: number, height: number): void;
   render(params: RenderParams): void;
   toBlob(type?: string): Promise<Blob | null>;
   dispose(): void;
@@ -153,6 +162,9 @@ export function createOverlayRenderer(canvas: HTMLCanvasElement): OverlayRendere
 
   let photoTex: WebGLTexture | null = null;
   let wallTex: WebGLTexture | null = null;
+  let maskTex: WebGLTexture | null = null;
+  let maskSize = { w: 0, h: 0 };
+  let useMask = false;
 
   function setPhoto(source: TexImageSource) {
     if (photoTex) gl!.deleteTexture(photoTex);
@@ -161,6 +173,58 @@ export function createOverlayRenderer(canvas: HTMLCanvasElement): OverlayRendere
   function setWallpaper(source: TexImageSource) {
     if (wallTex) gl!.deleteTexture(wallTex);
     wallTex = makeTexture(gl!, source, true);
+  }
+
+  function setWallMask(data: Uint8Array | null, width: number, height: number) {
+    if (maskTex) {
+      gl!.deleteTexture(maskTex);
+      maskTex = null;
+    }
+    useMask = false;
+    if (!data || !width || !height) return;
+
+    const tex = gl!.createTexture()!;
+    gl!.bindTexture(gl!.TEXTURE_2D, tex);
+    gl!.pixelStorei(gl!.UNPACK_ALIGNMENT, 1);
+
+    try {
+      gl!.texImage2D(
+        gl!.TEXTURE_2D,
+        0,
+        gl!.R8,
+        width,
+        height,
+        0,
+        gl!.RED,
+        gl!.UNSIGNED_BYTE,
+        data,
+      );
+    } catch {
+      // Fallback for GPUs without R8 single-channel textures.
+      const rgba = new Uint8Array(width * height * 4);
+      for (let i = 0; i < data.length; i++) {
+        rgba[i * 4] = data[i];
+      }
+      gl!.texImage2D(
+        gl!.TEXTURE_2D,
+        0,
+        gl!.RGBA,
+        width,
+        height,
+        0,
+        gl!.RGBA,
+        gl!.UNSIGNED_BYTE,
+        rgba,
+      );
+    }
+
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.CLAMP_TO_EDGE);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
+    maskTex = tex;
+    maskSize = { w: width, h: height };
+    useMask = true;
   }
 
   function render(params: RenderParams) {
@@ -221,6 +285,14 @@ export function createOverlayRenderer(canvas: HTMLCanvasElement): OverlayRendere
       gl!.activeTexture(gl!.TEXTURE1);
       gl!.bindTexture(gl!.TEXTURE_2D, photoTex);
       gl!.uniform1i(gl!.getUniformLocation(wallProg, "uPhoto"), 1);
+      if (useMask && maskTex) {
+        gl!.activeTexture(gl!.TEXTURE2);
+        gl!.bindTexture(gl!.TEXTURE_2D, maskTex);
+        gl!.uniform1i(gl!.getUniformLocation(wallProg, "uMask"), 2);
+        gl!.uniform1f(gl!.getUniformLocation(wallProg, "uUseMask"), 1);
+      } else {
+        gl!.uniform1f(gl!.getUniformLocation(wallProg, "uUseMask"), 0);
+      }
       gl!.uniform2f(gl!.getUniformLocation(wallProg, "uRepeat"), tilesX, tilesY);
       gl!.uniform1f(gl!.getUniformLocation(wallProg, "uRot"), (params.rotationDeg * Math.PI) / 180);
       gl!.uniform1f(gl!.getUniformLocation(wallProg, "uBlend"), params.blend);
@@ -240,6 +312,7 @@ export function createOverlayRenderer(canvas: HTMLCanvasElement): OverlayRendere
   function dispose() {
     if (photoTex) gl!.deleteTexture(photoTex);
     if (wallTex) gl!.deleteTexture(wallTex);
+    if (maskTex) gl!.deleteTexture(maskTex);
     gl!.deleteProgram(wallProg);
     gl!.deleteProgram(photoProg);
     gl!.deleteBuffer(photoBuf);
@@ -248,7 +321,7 @@ export function createOverlayRenderer(canvas: HTMLCanvasElement): OverlayRendere
     gl!.deleteBuffer(wallIdxBuf);
   }
 
-  return { setPhoto, setWallpaper, render, toBlob, dispose };
+  return { setPhoto, setWallpaper, setWallMask, render, toBlob, dispose };
 }
 
 function bindPosUV(gl: WebGL2RenderingContext, prog: WebGLProgram) {
